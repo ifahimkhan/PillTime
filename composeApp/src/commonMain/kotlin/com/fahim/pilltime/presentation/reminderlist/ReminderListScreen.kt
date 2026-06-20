@@ -46,6 +46,11 @@ import com.fahim.pilltime.core.ui.formatTime
 import com.fahim.pilltime.domain.model.Reminder
 import org.koin.compose.viewmodel.koinViewModel
 
+import androidx.compose.material3.AlertDialog
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+
 @Composable
 fun ReminderListScreen(
     onAddReminder: () -> Unit,
@@ -53,14 +58,43 @@ fun ReminderListScreen(
     viewModel: ReminderListViewModel = koinViewModel(),
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
+    var reminderIdToDelete by remember { mutableStateOf<Long?>(null) }
+
     ReminderListContent(
         state = state,
         onAddReminder = onAddReminder,
         onEditReminder = onEditReminder,
         onToggle = viewModel::toggleActive,
-        onDelete = viewModel::deleteReminder,
+        onDelete = { id -> reminderIdToDelete = id },
         onOpenSettings = ::openExactAlarmSettings,
     )
+
+    reminderIdToDelete?.let { id ->
+        val medicineName = (state as? ReminderListUiState.Loaded)?.reminders?.find { it.id == id }?.medicineName ?: "this reminder"
+        AlertDialog(
+            onDismissRequest = { reminderIdToDelete = null },
+            title = { Text("Delete Reminder", fontWeight = FontWeight.SemiBold) },
+            text = { Text("Are you sure you want to delete the reminder for $medicineName?") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        viewModel.deleteReminder(id)
+                        reminderIdToDelete = null
+                    }
+                ) {
+                    Text("Delete", color = PillTimeColors.due, fontWeight = FontWeight.SemiBold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { reminderIdToDelete = null }) {
+                    Text("Cancel", color = PillTimeColors.inkMuted)
+                }
+            },
+            containerColor = PillTimeColors.surface,
+            titleContentColor = PillTimeColors.ink,
+            textContentColor = PillTimeColors.ink,
+        )
+    }
 }
 
 /** Stateless content — driven purely by [state] + callbacks, so it is fully previewable. */

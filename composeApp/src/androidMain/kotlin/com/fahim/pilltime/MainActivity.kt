@@ -29,6 +29,12 @@ class MainActivity : ComponentActivity() {
             App()
         }
     }
+
+    override fun onResume() {
+        super.onResume()
+        val intent = android.content.Intent(this, com.fahim.pilltime.notification.AlarmService::class.java)
+        stopService(intent)
+    }
 }
 
 @Preview

@@ -36,13 +36,14 @@ class IosReminderScheduler : ReminderScheduler {
         val content = UNMutableNotificationContent().apply {
             setTitle("Time to take ${reminder.medicine_name}")
             setBody(reminder.dosage?.takeIf { it.isNotBlank() }?.let { "Dosage: $it" } ?: "Tap when taken")
-            setSound(UNNotificationSound.defaultSound)
+            setSound(UNNotificationSound.soundNamed("Alarmed.wav"))
             setCategoryIdentifier(CATEGORY_ID)
         }
 
         val components = NSDateComponents().apply {
             hour = reminder.hour
             minute = reminder.minute
+            second = 0
         }
         val trigger = UNCalendarNotificationTrigger.triggerWithDateMatchingComponents(
             dateComponents = components,
@@ -55,7 +56,11 @@ class IosReminderScheduler : ReminderScheduler {
             trigger = trigger,
         )
         // Re-adding the same identifier replaces the previous request, so update == reschedule.
-        center.addNotificationRequest(request, withCompletionHandler = null)
+        center.addNotificationRequest(request) { error ->
+            if (error != null) {
+                println("Error scheduling iOS notification: ${error.localizedDescription}")
+            }
+        }
     }
 
     override suspend fun cancelReminder(reminderId: Long) {
@@ -80,12 +85,12 @@ class IosReminderScheduler : ReminderScheduler {
         val taken = UNNotificationAction.actionWithIdentifier(
             identifier = ACTION_TAKEN,
             title = "Taken",
-            options = UNNotificationActionOptionForeground,
+            options = 0UL,
         )
         val snooze = UNNotificationAction.actionWithIdentifier(
             identifier = ACTION_SNOOZE,
             title = "Snooze 10 min",
-            options = UNNotificationActionOptionForeground,
+            options = 0UL,
         )
         val category = UNNotificationCategory.categoryWithIdentifier(
             identifier = CATEGORY_ID,
