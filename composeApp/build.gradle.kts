@@ -26,6 +26,7 @@ kotlin {
             // Kept as "Shared" so the existing iosApp `import Shared` needs no change.
             baseName = "Shared"
             isStatic = true
+            linkerOpts("-lsqlite3")
         }
     }
 
