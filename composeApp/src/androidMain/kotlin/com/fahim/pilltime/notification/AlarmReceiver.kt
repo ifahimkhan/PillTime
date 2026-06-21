@@ -32,6 +32,9 @@ class AlarmReceiver : BroadcastReceiver() {
         )
 
         when (intent.action) {
+            // Both "Stop" and "Taken" simply silence/stop the currently-ringing alarm. The daily
+            // schedule was already re-armed when the alarm first fired, so tomorrow is unaffected.
+            AlarmConst.ACTION_STOP,
             AlarmConst.ACTION_TAKEN -> {
                 context.stopService(Intent(context, AlarmService::class.java))
             }
@@ -49,11 +52,13 @@ class AlarmReceiver : BroadcastReceiver() {
                 val triggerAt = System.currentTimeMillis() + AlarmConst.SNOOZE_MINUTES * 60_000L
                 val am = context.getSystemService(Context.ALARM_SERVICE) as android.app.AlarmManager
                 if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S || am.canScheduleExactAlarms()) {
-                    am.setExactAndAllowWhileIdle(
-                        android.app.AlarmManager.RTC_WAKEUP,
+                    // setAlarmClock (Doze-exempt) so the snooze fires exactly, even if it lands
+                    // close to another scheduled reminder.
+                    val info = android.app.AlarmManager.AlarmClockInfo(
                         triggerAt,
-                        pi,
+                        appShowPendingIntent(context),
                     )
+                    am.setAlarmClock(info, pi)
                 }
             }
 

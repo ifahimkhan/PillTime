@@ -2,6 +2,7 @@ package com.fahim.pilltime.presentation.reminderlist
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.fahim.pilltime.core.platform.hasNotificationPermission
 import com.fahim.pilltime.data.repository.ReminderRepository
 import com.fahim.pilltime.domain.model.Reminder
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,10 +13,14 @@ import kotlinx.coroutines.launch
 /** State for the reminder list screen. */
 sealed interface ReminderListUiState {
     data object Loading : ReminderListUiState
-    data object Empty : ReminderListUiState
+    data class Empty(
+        val exactAlarmPermissionGranted: Boolean,
+        val notificationPermissionGranted: Boolean,
+    ) : ReminderListUiState
     data class Loaded(
         val reminders: List<Reminder>,
         val exactAlarmPermissionGranted: Boolean,
+        val notificationPermissionGranted: Boolean,
     ) : ReminderListUiState
 }
 
@@ -30,18 +35,31 @@ class ReminderListViewModel(
     private val _uiState = MutableStateFlow<ReminderListUiState>(ReminderListUiState.Loading)
     val uiState: StateFlow<ReminderListUiState> = _uiState.asStateFlow()
 
+    // Latest reminders, retained so permission re-checks (on app resume) can rebuild the
+    // Loaded state without waiting for the DB flow to re-emit.
+    private var lastReminders: List<Reminder> = emptyList()
+
     init {
         viewModelScope.launch {
             repository.observeReminders().collect { reminders ->
-                _uiState.value = if (reminders.isEmpty()) {
-                    ReminderListUiState.Empty
-                } else {
-                    ReminderListUiState.Loaded(
-                        reminders = reminders,
-                        exactAlarmPermissionGranted = repository.checkExactAlarmPermission(),
-                    )
-                }
+                lastReminders = reminders
+                _uiState.value = buildState(reminders)
             }
+        }
+    }
+
+    /** Re-evaluate permission state (e.g. after returning from system settings) and refresh. */
+    fun refreshPermissions() {
+        viewModelScope.launch { _uiState.value = buildState(lastReminders) }
+    }
+
+    private suspend fun buildState(reminders: List<Reminder>): ReminderListUiState {
+        val exactAlarmGranted = repository.checkExactAlarmPermission()
+        val notificationGranted = hasNotificationPermission()
+        return if (reminders.isEmpty()) {
+            ReminderListUiState.Empty(exactAlarmGranted, notificationGranted)
+        } else {
+            ReminderListUiState.Loaded(reminders, exactAlarmGranted, notificationGranted)
         }
     }
 

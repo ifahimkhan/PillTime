@@ -1,9 +1,13 @@
 package com.fahim.pilltime.notification
 
 import android.app.AlarmManager
+import android.app.NotificationChannel
+import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
+import android.net.Uri
 import android.os.Build
 import com.fahim.pilltime.core.notification.ReminderScheduler
 import com.fahim.pilltime.db.Reminder
@@ -18,6 +22,7 @@ internal object AlarmConst {
     const val ACTION_FIRE = "com.fahim.pilltime.action.ALARM_FIRE"
     const val ACTION_TAKEN = "com.fahim.pilltime.action.TAKEN"
     const val ACTION_SNOOZE = "com.fahim.pilltime.action.SNOOZE"
+    const val ACTION_STOP = "com.fahim.pilltime.action.STOP"
 
     // Intent extras (carry the whole reminder so receivers never need DB access to re-arm).
     const val EXTRA_ID = "extra_id"
@@ -33,6 +38,33 @@ internal object AlarmConst {
     // Distinct request-code spaces so the one-shot snooze alarm never overwrites the daily alarm.
     fun dailyRequestCode(id: Long): Int = id.toInt()
     fun snoozeRequestCode(id: Long): Int = (id + 1_000_000L).toInt()
+}
+
+/**
+ * Creates the medication-reminder notification channel. Idempotent: `createNotificationChannel`
+ * updates a channel in place if it already exists, so this is safe to call on every app start.
+ * The channel is created ONCE at startup and never deleted at runtime — repeatedly deleting and
+ * recreating a channel makes Android start ignoring its importance/sound settings.
+ */
+internal fun ensureReminderChannel(context: Context) {
+    if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+    val manager = context.getSystemService(NotificationManager::class.java)
+    val channel = NotificationChannel(
+        AlarmConst.CHANNEL_ID,
+        AlarmConst.CHANNEL_NAME,
+        NotificationManager.IMPORTANCE_HIGH,
+    ).apply {
+        description = "Exact-time medication reminders"
+        enableVibration(true)
+        vibrationPattern = longArrayOf(0, 500, 200, 500, 200, 500)
+        val soundUri = Uri.parse("android.resource://${context.packageName}/${com.fahim.pilltime.R.raw.alarmed}")
+        val audioAttributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_ALARM)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+            .build()
+        setSound(soundUri, audioAttributes)
+    }
+    manager.createNotificationChannel(channel)
 }
 
 /**
@@ -116,7 +148,7 @@ internal fun firePendingIntent(
     )
 }
 
-/** Schedule a single exact, Doze-resistant one-shot alarm. */
+/** Schedule a single exact, Doze-exempt one-shot alarm. */
 internal fun scheduleExactAlarm(
     context: Context,
     reminder: Reminder,
@@ -126,7 +158,25 @@ internal fun scheduleExactAlarm(
     val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !alarmManager.canScheduleExactAlarms()) return
     val pi = firePendingIntent(context, reminder, requestCode)
-    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, triggerAtMillis, pi)
+    // setAlarmClock is exempt from Doze and battery-optimization throttling, so alarms scheduled
+    // close together (e.g. 5 minutes apart) each fire at their exact time. setExactAndAllowWhileIdle
+    // is throttled to ~one alarm per 9-15 min window per app, which silently drops/defers the
+    // second of two nearby alarms.
+    val info = AlarmManager.AlarmClockInfo(triggerAtMillis, appShowPendingIntent(context))
+    alarmManager.setAlarmClock(info, pi)
+}
+
+/** PendingIntent shown when the user taps the system alarm indicator — just opens the app. */
+internal fun appShowPendingIntent(context: Context): PendingIntent {
+    val launch = Intent(context, com.fahim.pilltime.MainActivity::class.java).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+    }
+    return PendingIntent.getActivity(
+        context,
+        0,
+        launch,
+        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+    )
 }
 
 /** Cancel a scheduled alarm by request code. */

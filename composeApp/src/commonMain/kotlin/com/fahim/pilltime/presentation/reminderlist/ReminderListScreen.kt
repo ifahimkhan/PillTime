@@ -37,8 +37,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.fahim.pilltime.core.platform.openExactAlarmSettings
+import com.fahim.pilltime.core.platform.openNotificationSettings
 import com.fahim.pilltime.core.ui.CapsuleShape
 import com.fahim.pilltime.core.ui.PillTimeColors
 import com.fahim.pilltime.core.ui.PillTimeTheme
@@ -60,6 +63,10 @@ fun ReminderListScreen(
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     var reminderIdToDelete by remember { mutableStateOf<Long?>(null) }
 
+    // Re-check permissions whenever the screen resumes, so a banner clears immediately after the
+    // user grants the permission in system settings and returns to the app.
+    LifecycleEventEffect(Lifecycle.Event.ON_RESUME) { viewModel.refreshPermissions() }
+
     ReminderListContent(
         state = state,
         onAddReminder = onAddReminder,
@@ -67,6 +74,7 @@ fun ReminderListScreen(
         onToggle = viewModel::toggleActive,
         onDelete = { id -> reminderIdToDelete = id },
         onOpenSettings = ::openExactAlarmSettings,
+        onOpenNotificationSettings = ::openNotificationSettings,
     )
 
     reminderIdToDelete?.let { id ->
@@ -107,6 +115,7 @@ fun ReminderListContent(
     onToggle: (Long) -> Unit,
     onDelete: (Long) -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenNotificationSettings: () -> Unit,
 ) {
     Scaffold(
         topBar = {
@@ -136,17 +145,33 @@ fun ReminderListContent(
         Box(Modifier.fillMaxSize().padding(padding)) {
             when (val s = state) {
                 is ReminderListUiState.Loading -> Unit // local DB read is near-instant
-                is ReminderListUiState.Empty -> EmptyState(
-                    modifier = Modifier.fillMaxSize(),
-                    onAddReminder = onAddReminder,
-                )
+                is ReminderListUiState.Empty -> Column(Modifier.fillMaxSize()) {
+                    PermissionBanners(
+                        notificationGranted = s.notificationPermissionGranted,
+                        exactAlarmGranted = s.exactAlarmPermissionGranted,
+                        onOpenNotificationSettings = onOpenNotificationSettings,
+                        onOpenSettings = onOpenSettings,
+                        modifier = Modifier.fillMaxWidth().padding(16.dp),
+                    )
+                    EmptyState(
+                        modifier = Modifier.fillMaxWidth().weight(1f),
+                        onAddReminder = onAddReminder,
+                    )
+                }
                 is ReminderListUiState.Loaded -> LazyColumn(
                     modifier = Modifier.fillMaxSize(),
                     contentPadding = PaddingValues(16.dp, 8.dp, 16.dp, 96.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp),
                 ) {
-                    if (!s.exactAlarmPermissionGranted) {
-                        item { PermissionBanner(onOpenSettings = onOpenSettings) }
+                    if (!s.notificationPermissionGranted || !s.exactAlarmPermissionGranted) {
+                        item {
+                            PermissionBanners(
+                                notificationGranted = s.notificationPermissionGranted,
+                                exactAlarmGranted = s.exactAlarmPermissionGranted,
+                                onOpenNotificationSettings = onOpenNotificationSettings,
+                                onOpenSettings = onOpenSettings,
+                            )
+                        }
                     }
                     items(s.reminders, key = { it.id }) { reminder ->
                         ReminderCard(
@@ -223,8 +248,33 @@ private fun ReminderCard(
     }
 }
 
+/** The stacked permission banners (notifications + exact alarm), shown when either is missing. */
 @Composable
-private fun PermissionBanner(onOpenSettings: () -> Unit) {
+private fun PermissionBanners(
+    notificationGranted: Boolean,
+    exactAlarmGranted: Boolean,
+    onOpenNotificationSettings: () -> Unit,
+    onOpenSettings: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        if (!notificationGranted) {
+            PermissionBanner(
+                message = "Notifications are off, so reminder alarms won't show.",
+                onOpenSettings = onOpenNotificationSettings,
+            )
+        }
+        if (!exactAlarmGranted) {
+            PermissionBanner(
+                message = "Without exact-alarm permission, reminders may arrive late.",
+                onOpenSettings = onOpenSettings,
+            )
+        }
+    }
+}
+
+@Composable
+private fun PermissionBanner(message: String, onOpenSettings: () -> Unit) {
     Surface(
         shape = CapsuleShape,
         color = PillTimeColors.dueSoft,
@@ -235,7 +285,7 @@ private fun PermissionBanner(onOpenSettings: () -> Unit) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                "Without this permission, reminders may arrive late.",
+                message,
                 modifier = Modifier.weight(1f),
                 fontSize = 14.sp,
                 color = PillTimeColors.ink,
@@ -291,8 +341,13 @@ private val sampleReminders = listOf(
 private fun ReminderListLoadedPreview() {
     PillTimeTheme {
         ReminderListContent(
-            state = ReminderListUiState.Loaded(sampleReminders, exactAlarmPermissionGranted = false),
-            onAddReminder = {}, onEditReminder = {}, onToggle = {}, onDelete = {}, onOpenSettings = {},
+            state = ReminderListUiState.Loaded(
+                sampleReminders,
+                exactAlarmPermissionGranted = false,
+                notificationPermissionGranted = false,
+            ),
+            onAddReminder = {}, onEditReminder = {}, onToggle = {}, onDelete = {},
+            onOpenSettings = {}, onOpenNotificationSettings = {},
         )
     }
 }
@@ -302,8 +357,12 @@ private fun ReminderListLoadedPreview() {
 private fun ReminderListEmptyPreview() {
     PillTimeTheme {
         ReminderListContent(
-            state = ReminderListUiState.Empty,
-            onAddReminder = {}, onEditReminder = {}, onToggle = {}, onDelete = {}, onOpenSettings = {},
+            state = ReminderListUiState.Empty(
+                exactAlarmPermissionGranted = true,
+                notificationPermissionGranted = false,
+            ),
+            onAddReminder = {}, onEditReminder = {}, onToggle = {}, onDelete = {},
+            onOpenSettings = {}, onOpenNotificationSettings = {},
         )
     }
 }

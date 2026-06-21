@@ -2,6 +2,7 @@ package com.fahim.pilltime
 
 import android.app.Application
 import com.fahim.pilltime.core.di.initKoin
+import com.fahim.pilltime.notification.ensureReminderChannel
 import org.koin.android.ext.koin.androidContext
 
 /**
@@ -13,5 +14,7 @@ class PillTimeApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         initKoin { androidContext(this@PillTimeApplication) }
+        // Create the reminder notification channel once, at startup (never deleted at runtime).
+        ensureReminderChannel(this)
     }
 }
